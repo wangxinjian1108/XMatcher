@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# xmatcher
+weights/*
+!weights/README.md
+!weights/WEIGHTS.lock
+outputs/
+.env

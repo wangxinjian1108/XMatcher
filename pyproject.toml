@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xmatcher"
+version = "0.1.0"
+description = "Unified keypoints matching interface"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pyyaml",
+  "pydantic>=2.0",
+  "opencv-python",
+  "einops",
+  "gdown",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-mock"]
+
+[project.scripts]
+xmatcher = "xmatcher.cli.run:main"
+
+[tool.setuptools.packages.find]
+include = ["xmatcher*"]
+
+[tool.pytest.ini_options]
+markers = [
+  "gpu: requires CUDA",
+  "requires_weights(method): requires weights for the named method to be present",
+]
