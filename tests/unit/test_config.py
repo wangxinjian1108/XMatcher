@@ -82,3 +82,21 @@ def test_build_matcher_rejects_invalid_params():
 def test_runconfig_rejects_unknown_device():
     with pytest.raises(ValidationError):
         RunConfig.model_validate({"method": "toy", "device": "tpu", "params": {}})
+
+
+def test_efficient_loftr_params_rejects_missing_weights(tmp_path, monkeypatch):
+    from xmatcher.methods.efficient_loftr import EfficientLoFTRParams
+    monkeypatch.setenv("XMATCHER_WEIGHTS_DIR", str(tmp_path))
+    import pytest
+    with pytest.raises(FileNotFoundError, match="Weight not found"):
+        EfficientLoFTRParams(weights="efficient_loftr/missing.ckpt")
+
+
+def test_efficient_loftr_params_accepts_existing_weights(tmp_path, monkeypatch):
+    from xmatcher.methods.efficient_loftr import EfficientLoFTRParams
+    monkeypatch.setenv("XMATCHER_WEIGHTS_DIR", str(tmp_path))
+    fake = tmp_path / "efficient_loftr" / "x.ckpt"
+    fake.parent.mkdir(parents=True)
+    fake.write_bytes(b"")
+    p = EfficientLoFTRParams(weights="efficient_loftr/x.ckpt")
+    assert p.weights == fake.resolve() or p.weights == fake
