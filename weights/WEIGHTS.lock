@@ -1,0 +1,7 @@
+# Schema: <method> -> <variant> -> {source, sha256, target}
+# source is one of: gdrive_id, http_url
+efficient_loftr:
+  outdoor:
+    gdrive_id: "<TO_FILL_DURING_FIRST_DOWNLOAD>"
+    sha256:    "<TO_FILL_DURING_FIRST_DOWNLOAD>"
+    target:    "efficient_loftr/eloftr_outdoor.ckpt"
