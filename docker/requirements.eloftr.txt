@@ -1,0 +1,4 @@
+pytorch-lightning>=2.0,<2.5
+yacs
+loguru
+h5py

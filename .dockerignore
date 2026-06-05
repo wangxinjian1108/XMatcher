@@ -1,0 +1,14 @@
+.git
+.github
+.vscode
+outputs/
+weights/*
+!weights/README.md
+!weights/WEIGHTS.lock
+**/__pycache__
+**/*.pyc
+.env
+VRecHub
+docs/
+*.md
+!README.md

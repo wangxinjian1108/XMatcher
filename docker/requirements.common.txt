@@ -1,0 +1,7 @@
+numpy
+opencv-python
+pyyaml
+pydantic>=2.0
+einops
+gdown
+pillow
