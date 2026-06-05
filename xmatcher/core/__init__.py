@@ -1,1 +1,9 @@
-# (empty for now; re-exports added in Task 2)
+from xmatcher.core.types import (
+    PreprocessMeta,
+    ImagePair,
+    MatchResult,
+    DenseField,
+    _RawOutput,
+)
+
+__all__ = ["PreprocessMeta", "ImagePair", "MatchResult", "DenseField"]
