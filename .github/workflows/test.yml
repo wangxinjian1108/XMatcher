@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure git for private submodules
+        run: |
+          git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install CPU PyTorch
+        run: |
+          pip install --upgrade pip
+          pip install torch==2.4.1 torchvision==0.19.1 \
+              --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install package
+        run: pip install -e .[test] kornia pytorch-lightning yacs loguru h5py
+
+      - name: Run unit + contract tests
+        run: pytest tests/unit tests/contract -v
