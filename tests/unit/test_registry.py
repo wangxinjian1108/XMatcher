@@ -44,3 +44,22 @@ def test_list_methods_returns_sorted_names():
     @register("alpha")
     class A: pass
     assert list_methods() == ["alpha", "zeta"]
+
+
+def test_lightglue_registers_on_methods_import():
+    """Importing xmatcher.methods triggers @register('lightglue')."""
+    from xmatcher.core.registry import _REGISTRY
+    saved = dict(_REGISTRY)
+    _REGISTRY.clear()
+    try:
+        # Force reimport of the methods package.
+        import importlib, sys
+        if "xmatcher.methods" in sys.modules:
+            del sys.modules["xmatcher.methods"]
+        if "xmatcher.methods.lightglue" in sys.modules:
+            del sys.modules["xmatcher.methods.lightglue"]
+        importlib.import_module("xmatcher.methods")
+        assert "lightglue" in _REGISTRY
+    finally:
+        _REGISTRY.clear()
+        _REGISTRY.update(saved)

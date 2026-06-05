@@ -1,4 +1,3 @@
-from xmatcher.methods import _thirdparty  # noqa: F401  (must be first)
+from xmatcher.methods import _thirdparty  # noqa: F401
 
-# Adapter modules will be added in subsequent tasks. Each one self-registers
-# via @register("<name>") on import.
+from xmatcher.methods import lightglue  # noqa: F401  (registers "lightglue")

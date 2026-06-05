@@ -1,0 +1,8 @@
+method: lightglue
+device: cuda
+seed: 0
+params:
+  features: superpoint
+  max_num_keypoints: 2048
+  detection_threshold: 0.0005
+  match_threshold: 0.1
