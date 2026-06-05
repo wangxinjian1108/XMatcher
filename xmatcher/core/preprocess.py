@@ -1,5 +1,6 @@
 from __future__ import annotations
 import torch
+import torch.nn.functional as F
 from xmatcher.core.types import PreprocessMeta
 
 
@@ -44,3 +45,30 @@ def filter_by_mask(
             mask_val = meta.valid_mask.to(pts.device)[vv, uu]
             keep = keep & mask_val
     return keep
+
+
+def _to_gray_align32(img: torch.Tensor) -> tuple[torch.Tensor, tuple[int, int]]:
+    """RGB or gray (C, H, W) in [0,1] → gray (1, H', W') padded right/bottom to multiples of 32.
+
+    Returns (img_padded, (pad_left, pad_top)). Right/bottom padding does not shift origin,
+    so the returned pad tuple is always (0, 0). Adapters subtract this from output
+    keypoints to get back to dataset's processed coordinate space.
+    """
+    if img.dim() != 3:
+        raise ValueError(f"expected (C, H, W), got shape {tuple(img.shape)}")
+    C, H, W = img.shape
+    if C == 3:
+        # Standard ITU-R BT.601 luminance weights.
+        weights = torch.tensor([0.299, 0.587, 0.114], dtype=img.dtype, device=img.device)
+        gray = (img * weights[:, None, None]).sum(dim=0, keepdim=True)
+    elif C == 1:
+        gray = img
+    else:
+        raise ValueError(f"expected 1 or 3 channels, got {C}")
+
+    pad_h = (32 - H % 32) % 32
+    pad_w = (32 - W % 32) % 32
+    if pad_h or pad_w:
+        # F.pad layout for (C, H, W): (left, right, top, bottom)
+        gray = F.pad(gray, (0, pad_w, 0, pad_h), mode="constant", value=0.0)
+    return gray, (0, 0)
