@@ -78,3 +78,27 @@ def test_dataset_pair_id_distinct_for_different_pairs(tmp_path):
     ))
     ids = [p.pair_id for p in ds]
     assert len(ids) == 2 and ids[0] != ids[1]
+
+
+def test_build_dataset_from_yaml_dict(tmp_path):
+    from xmatcher.dataset.config import DatasetConfig, build_dataset
+    pairs = _setup_imgs(tmp_path)
+    cfg = DatasetConfig.model_validate({
+        "type": "from_pair_list",
+        "params": {
+            "pairs_file": str(pairs),
+            "image_root": str(tmp_path / "imgs"),
+            "preprocess": {"resize_long_side": 320},
+        },
+    })
+    ds = build_dataset(cfg)
+    p = next(iter(ds))
+    assert p.image0.shape[-1] == 320 or p.image0.shape[-2] == 320
+
+
+def test_build_dataset_unknown_type_raises():
+    import pytest
+    from xmatcher.dataset.config import DatasetConfig, build_dataset
+    cfg = DatasetConfig.model_validate({"type": "nope", "params": {}})
+    with pytest.raises(KeyError, match="Unknown dataset"):
+        build_dataset(cfg)

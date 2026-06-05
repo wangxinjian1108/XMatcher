@@ -1,0 +1,6 @@
+type: from_pair_list
+params:
+  pairs_file: tests/fixtures/sample_pairs.txt
+  image_root: tests/fixtures
+  preprocess:
+    resize_long_side: 1024
