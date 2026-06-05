@@ -1,0 +1,12 @@
+[submodule "thirdparty/LightGlue"]
+	path = thirdparty/LightGlue
+	url = git@github.com:wangxinjian1108/LightGlue.git
+[submodule "thirdparty/EfficientLoFTR"]
+	path = thirdparty/EfficientLoFTR
+	url = git@github.com:wangxinjian1108/EfficientLoFTR.git
+[submodule "thirdparty/RoMaV2"]
+	path = thirdparty/RoMaV2
+	url = git@github.com:wangxinjian1108/RoMaV2.git
+[submodule "thirdparty/accelerated_features"]
+	path = thirdparty/accelerated_features
+	url = git@github.com:wangxinjian1108/accelerated_features.git
