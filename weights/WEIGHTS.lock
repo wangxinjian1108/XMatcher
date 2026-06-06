@@ -10,5 +10,5 @@
 efficient_loftr:
   outdoor:
     http_url: "https://huggingface.co/zju-community/efficientloftr/resolve/main/eloftr_outdoor.ckpt"
-    sha256:   "BOOTSTRAP"
+    sha256:   "0af6291141c736e75e94b7f8aae4399b77c7731b3f08758212b2cfe370188878"
     target:   "efficient_loftr/eloftr_outdoor.ckpt"
