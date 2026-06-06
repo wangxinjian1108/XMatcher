@@ -18,8 +18,10 @@ ARG BASE_IMAGE=ghcr.io/wangxinjian1108/xmatcher:latest
 FROM ${BASE_IMAGE}
 
 # Allow callers to route HuggingFace through a mirror at build time.
+# We only export HF_ENDPOINT into the container's env when the caller passed
+# a non-empty value; an empty ENV would still be visible to huggingface_hub
+# and confuse it into building protocol-less URLs.
 ARG HF_ENDPOINT=""
-ENV HF_ENDPOINT=${HF_ENDPOINT}
 
 # 1. LightGlue weights — pinned by sha256 in WEIGHTS.lock, downloaded by
 #    our verifier script. Files land under XMATCHER_WEIGHTS_DIR (set in
@@ -33,12 +35,12 @@ RUN scripts/download_weights.sh lightglue && \
        /root/.cache/torch/hub/checkpoints/superpoint_lightglue_v0-1_arxiv.pth
 
 # 2. EfficientLoFTR weights — fetched via huggingface_hub into
-#    ~/.cache/huggingface/. We use snapshot_download with a pinned revision
-#    to avoid any later upstream rename/move surprising us; the revision is
-#    captured here as a deliberate version pin.
+#    ~/.cache/huggingface/. Pin to a specific revision so a later upstream
+#    rename can't surprise us at rebuild time.
 ARG ELOFTR_REPO=zju-community/efficientloftr
 ARG ELOFTR_REVISION=face1a79050ffa3e9da28720d1cf93aaf2e8f421
-RUN python -c "from huggingface_hub import snapshot_download; \
+RUN if [ -n "${HF_ENDPOINT}" ]; then export HF_ENDPOINT="${HF_ENDPOINT}"; fi && \
+    python -c "from huggingface_hub import snapshot_download; \
     snapshot_download(repo_id='${ELOFTR_REPO}', revision='${ELOFTR_REVISION}')"
 
 # ENTRYPOINT and CMD are inherited from the base image.
