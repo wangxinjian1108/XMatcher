@@ -1,0 +1,30 @@
+# Bundled image: lean xmatcher + all method weights baked in.
+#
+# Trade-off vs. the lean image:
+#   + No volume mount needed for weights
+#   + Air-gapped / offline-first deployments work out of the box
+#   - ~250 MB larger (eloftr_outdoor.ckpt ≈ 184 MB + LightGlue ≈ 50 MB)
+#   - Tied to specific weight versions; bumping requires a rebuild
+#
+# Use the lean image (`xmatcher:latest`) for development and CI; use this
+# bundled variant (`xmatcher:latest-bundled`) for one-shot demos or
+# environments that can't mount external caches.
+ARG BASE_IMAGE=ghcr.io/wangxinjian1108/xmatcher:latest
+FROM ${BASE_IMAGE}
+
+# Download weights into XMATCHER_WEIGHTS_DIR (set in the base image).
+# Network is needed at build time; the script verifies sha256 against
+# weights/WEIGHTS.lock and hard-errors on any mismatch.
+RUN scripts/download_weights.sh efficient_loftr lightglue
+
+# Pre-warm the torch.hub cache the LightGlue adapter looks at.
+# At runtime the adapter calls `torch.hub.load_state_dict_from_url(...)` which
+# resolves to ~/.cache/torch/hub/checkpoints/<filename>. We seed it from the
+# already-downloaded XMATCHER_WEIGHTS_DIR copies so first inference is offline.
+RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
+    cp ${XMATCHER_WEIGHTS_DIR}/lightglue/superpoint_v1.pth \
+       /root/.cache/torch/hub/checkpoints/superpoint_v1.pth && \
+    cp ${XMATCHER_WEIGHTS_DIR}/lightglue/superpoint_lightglue.pth \
+       /root/.cache/torch/hub/checkpoints/superpoint_lightglue_v0-1_arxiv.pth
+
+# ENTRYPOINT and CMD are inherited from the base image.

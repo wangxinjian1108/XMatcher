@@ -25,12 +25,33 @@ python -m xmatcher.cli.run \
 
 ## Docker
 
+Two image flavors are published to GHCR on every push to `main`:
+
+- `ghcr.io/wangxinjian1108/xmatcher:latest` — lean (~5 GB), expects weights
+  to be mounted from the host.
+- `ghcr.io/wangxinjian1108/xmatcher:latest-bundled` — same image with
+  EfficientLoFTR + LightGlue weights baked in (~5.3 GB), no mount required.
+
+Tagged versions (`v*`) and per-commit SHA tags work the same way, with the
+`-bundled` suffix for the bundled flavor.
+
+Local build (lean):
 ```bash
 docker/build.sh   # build xmatcher:dev locally
 docker run --rm --gpus all \
     -v $HOME/.cache/xmatcher:/root/.cache/xmatcher \
     -v $PWD/outputs:/app/outputs \
     xmatcher:dev \
+    --method-cfg configs/lightglue.yaml \
+    --dataset-cfg configs/dataset/sample_pairs.yaml \
+    --out outputs/lg/
+```
+
+Bundled image (no weights mount needed):
+```bash
+docker run --rm --gpus all \
+    -v $PWD/outputs:/app/outputs \
+    ghcr.io/wangxinjian1108/xmatcher:latest-bundled \
     --method-cfg configs/lightglue.yaml \
     --dataset-cfg configs/dataset/sample_pairs.yaml \
     --out outputs/lg/

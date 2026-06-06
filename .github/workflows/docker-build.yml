@@ -37,7 +37,7 @@ jobs:
         env:
           OWNER: ${{ github.repository_owner }}
 
-      - name: Compute image tags
+      - name: Compute lean image tags
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -48,12 +48,41 @@ jobs:
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/build-push-action@v5
+      - name: Build & push lean image
+        id: lean
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Compute bundled image tags
+        id: meta_bundled
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.lower.outputs.owner }}/xmatcher
+          # Suffix every lean tag with `-bundled` so they don't collide.
+          tags: |
+            type=ref,event=branch,suffix=-bundled
+            type=ref,event=tag,suffix=-bundled
+            type=sha,format=long,suffix=-bundled
+            type=raw,value=latest-bundled,enable={{is_default_branch}}
+
+      - name: Build & push bundled image (weights baked in)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.bundled
+          push: true
+          # Pin the bundled stage's FROM to the digest we just pushed,
+          # so the two images are always consistent within a single run.
+          build-args: |
+            BASE_IMAGE=ghcr.io/${{ steps.lower.outputs.owner }}/xmatcher@${{ steps.lean.outputs.digest }}
+          tags: ${{ steps.meta_bundled.outputs.tags }}
+          labels: ${{ steps.meta_bundled.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
