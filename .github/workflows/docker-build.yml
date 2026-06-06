@@ -37,13 +37,23 @@ jobs:
         env:
           OWNER: ${{ github.repository_owner }}
 
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.lower.outputs.owner }}/xmatcher
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
       - uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile
           push: true
-          tags: |
-            ghcr.io/${{ steps.lower.outputs.owner }}/xmatcher:latest
-            ghcr.io/${{ steps.lower.outputs.owner }}/xmatcher:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
