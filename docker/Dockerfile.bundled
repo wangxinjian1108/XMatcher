@@ -45,4 +45,13 @@ from huggingface_hub import snapshot_download; \
 print(f'[bundled] huggingface_hub {huggingface_hub.__version__} endpoint={os.environ.get(\"HF_ENDPOINT\")!r}', file=sys.stderr); \
 snapshot_download(repo_id='${ELOFTR_REPO}', revision='${ELOFTR_REVISION}')"
 
+# Force offline mode at runtime: transformers / huggingface_hub will use the
+# cache populated above instead of trying to revalidate ETags against
+# huggingface.co. Without this, `docker run --network none` fails because
+# from_pretrained() insists on a HEAD request before reading the cache.
+# Override (e.g. to pull a different revision) by setting these to 0 at
+# `docker run` time.
+ENV HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
 # ENTRYPOINT and CMD are inherited from the base image.
