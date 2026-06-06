@@ -43,12 +43,22 @@ RUN HF_ENDPOINT="${HF_ENDPOINT}" python -c "\
 import os, sys, huggingface_hub; \
 from huggingface_hub import snapshot_download; \
 print(f'[bundled] huggingface_hub {huggingface_hub.__version__} endpoint={os.environ.get(\"HF_ENDPOINT\")!r}', file=sys.stderr); \
-snapshot_download(repo_id='${ELOFTR_REPO}', revision='${ELOFTR_REVISION}')"
+snapshot_download(repo_id='${ELOFTR_REPO}', revision='${ELOFTR_REVISION}')" && \
+    python -c "\
+import os; \
+from huggingface_hub.constants import HF_HUB_CACHE; \
+repo = '${ELOFTR_REPO}'.replace('/', '--'); \
+refs = os.path.join(HF_HUB_CACHE, f'models--{repo}', 'refs'); \
+os.makedirs(refs, exist_ok=True); \
+open(os.path.join(refs, 'main'), 'w').write('${ELOFTR_REVISION}'); \
+print(f'[bundled] wrote refs/main={\"${ELOFTR_REVISION}\"} → {refs}')"
 
 # Force offline mode at runtime: transformers / huggingface_hub will use the
 # cache populated above instead of trying to revalidate ETags against
 # huggingface.co. Without this, `docker run --network none` fails because
 # from_pretrained() insists on a HEAD request before reading the cache.
+# Without `refs/main` pointing at the pinned revision, even offline mode
+# can't resolve the implicit `revision="main"` default.
 # Override (e.g. to pull a different revision) by setting these to 0 at
 # `docker run` time.
 ENV HF_HUB_OFFLINE=1 \
