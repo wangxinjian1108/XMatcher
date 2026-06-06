@@ -47,9 +47,15 @@ class EfficientLoFTRMatcher(BaseMatcher):
     def _setup(self):
         from src.loftr import LoFTR, reparameter
         from src.config.default import get_cfg_defaults
+        from src.loftr.utils.full_config import lower_config
         cfg = get_cfg_defaults()
         cfg.LOFTR.MATCH_COARSE.THR = self.params.match_threshold
         cfg.LOFTR.MATCH_COARSE.BORDER_RM = self.params.border_rm
+        # NPE = [train_long_side, train_long_side, eval_long_side, eval_long_side].
+        # Training resolution is 832 (per upstream test.py). We use the matching
+        # 832 here as a safe default that works for any input long-side
+        # by relying on RoPE's relative encoding within that range.
+        cfg.LOFTR.COARSE.NPE = [832, 832, 832, 832]
         if self.params.precision == "fp16":
             cfg.LOFTR.HALF = True
             cfg.LOFTR.MP = False
@@ -60,8 +66,14 @@ class EfficientLoFTRMatcher(BaseMatcher):
             cfg.LOFTR.HALF = False
             cfg.LOFTR.MP = True
 
-        self.matcher = LoFTR(config=cfg.LOFTR)
-        state = torch.load(self.params.weights, map_location="cpu")
+        # LoFTR's submodules look up their config keys in lowercase
+        # (e.g. backbone reads config['backbone_type']), while yacs CfgNode
+        # exposes them uppercase. lower_config() bridges the two.
+        self.matcher = LoFTR(config=lower_config(cfg.LOFTR))
+        # weights_only=False: the upstream ckpt embeds pytorch_lightning
+        # ModelCheckpoint training metadata. We pin the file's sha256 in
+        # WEIGHTS.lock, so source integrity is verified separately.
+        state = torch.load(self.params.weights, map_location="cpu", weights_only=False)
         self.matcher.load_state_dict(state["state_dict"])
         self.matcher = reparameter(self.matcher).eval().to(self.device)
         self._cfg = cfg
