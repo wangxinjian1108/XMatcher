@@ -8,13 +8,19 @@ Bootstrap mode (--bootstrap):
     For entries whose sha256 is "BOOTSTRAP" (or starts with "<"), download
     the file regardless and print its computed sha256 so you can paste it
     back into WEIGHTS.lock. Without --bootstrap, those entries hard-error.
+
+HuggingFace gated/private repos:
+    When HF_TOKEN env var is set, an Authorization: Bearer header is sent
+    on requests to huggingface.co. Public files don't need this.
 """
 from __future__ import annotations
 import argparse
 import hashlib
+import os
 import sys
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 import yaml
 
 
@@ -39,9 +45,21 @@ def _fetch_gdrive(file_id: str, dest: Path) -> None:
     gdown.download(id=file_id, output=str(dest), quiet=False)
 
 
+def _build_http_request(url: str) -> urllib.request.Request:
+    """Build a Request, attaching HF_TOKEN as a Bearer header for huggingface.co."""
+    req = urllib.request.Request(url)
+    host = (urlparse(url).hostname or "").lower()
+    if host.endswith("huggingface.co"):
+        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+    return req
+
+
 def _fetch_http(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as r, dest.open("wb") as f:
+    req = _build_http_request(url)
+    with urllib.request.urlopen(req) as r, dest.open("wb") as f:
         while True:
             chunk = r.read(1 << 20)
             if not chunk:

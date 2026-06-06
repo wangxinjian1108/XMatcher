@@ -26,3 +26,14 @@ scripts/download_weights.sh efficient_loftr
 
 If the recorded sha256 ever mismatches what was downloaded, the script deletes
 the file and exits non-zero — never silent success.
+
+## Private / gated HuggingFace repos
+
+Set `HF_TOKEN` (or `HUGGING_FACE_HUB_TOKEN`) before running the script. The
+downloader sends `Authorization: Bearer $HF_TOKEN` only on requests to
+`huggingface.co` (and its subdomains); other hosts never see the token.
+
+```bash
+export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+scripts/download_weights.sh efficient_loftr
+```
