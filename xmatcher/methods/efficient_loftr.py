@@ -28,14 +28,17 @@ class EfficientLoFTRMatcher(BaseMatcher):
     def _setup(self):
         from transformers import AutoImageProcessor, AutoModelForKeypointMatching
         self.processor = AutoImageProcessor.from_pretrained(self.params.repo_id)
-        dtype = {
+        torch_dtype = {
             "fp32": torch.float32,
             "fp16": torch.float16,
             "bf16": torch.bfloat16,
         }[self.params.precision]
+        # transformers 4.51-4.54 takes `torch_dtype`; 5.x deprecated it in favor
+        # of `dtype` but still accepts it. We're pinned to <4.55 due to a
+        # PyTorch 2.7-only symbol in transformers.integrations.finegrained_fp8.
         self.model = (
             AutoModelForKeypointMatching
-            .from_pretrained(self.params.repo_id, dtype=dtype)
+            .from_pretrained(self.params.repo_id, torch_dtype=torch_dtype)
             .eval()
             .to(self.device)
         )
