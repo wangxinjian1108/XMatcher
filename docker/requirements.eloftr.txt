@@ -1,2 +1,7 @@
-transformers>=4.51
+# transformers >=4.51 added EfficientLoFTRForKeypointMatching.
+# Cap below 4.55 because newer versions reference torch.float8_e8m0fnu in
+# integrations/finegrained_fp8.py at import time, which is only present in
+# PyTorch 2.7+. Our base image pins torch==2.4.1 (cu121) to keep CUDA
+# compatibility, so we have to stay on the older transformers line.
+transformers>=4.51,<4.55
 safetensors
