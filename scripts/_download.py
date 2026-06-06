@@ -3,6 +3,11 @@
 
 Reads the lock file, fetches missing/changed entries for the given method,
 and verifies sha256. Hard error on mismatch — never silent success.
+
+Bootstrap mode (--bootstrap):
+    For entries whose sha256 is "BOOTSTRAP" (or starts with "<"), download
+    the file regardless and print its computed sha256 so you can paste it
+    back into WEIGHTS.lock. Without --bootstrap, those entries hard-error.
 """
 from __future__ import annotations
 import argparse
@@ -11,6 +16,13 @@ import sys
 import urllib.request
 from pathlib import Path
 import yaml
+
+
+_BOOTSTRAP_SENTINELS = ("BOOTSTRAP",)
+
+
+def _is_placeholder(value: str) -> bool:
+    return value in _BOOTSTRAP_SENTINELS or value.startswith("<")
 
 
 def _sha256_of(path: Path) -> str:
@@ -37,26 +49,41 @@ def _fetch_http(url: str, dest: Path) -> None:
             f.write(chunk)
 
 
-def _process_entry(name: str, entry: dict, target_root: Path) -> None:
-    target = target_root / entry["target"]
-    expected_sha = entry.get("sha256", "")
-    if expected_sha.startswith("<"):
-        sys.exit(
-            f"[download] '{name}': sha256 placeholder not filled in WEIGHTS.lock. "
-            f"Run a one-time manual download, then update the lock file."
-        )
-    if target.exists() and _sha256_of(target) == expected_sha:
-        print(f"[download] {name}: up to date ({target})")
-        return
+def _do_download(name: str, entry: dict, target: Path) -> None:
     if "gdrive_id" in entry:
         gid = entry["gdrive_id"]
-        if gid.startswith("<"):
+        if _is_placeholder(gid):
             sys.exit(f"[download] '{name}': gdrive_id placeholder not filled.")
         _fetch_gdrive(gid, target)
     elif "http_url" in entry:
         _fetch_http(entry["http_url"], target)
     else:
         sys.exit(f"[download] '{name}': missing 'gdrive_id' or 'http_url'.")
+
+
+def _process_entry(name: str, entry: dict, target_root: Path, *, bootstrap: bool) -> None:
+    target = target_root / entry["target"]
+    expected_sha = entry.get("sha256", "")
+
+    if _is_placeholder(expected_sha):
+        if not bootstrap:
+            sys.exit(
+                f"[download] '{name}': sha256 placeholder ({expected_sha!r}) in WEIGHTS.lock. "
+                f"Run with --bootstrap to download and capture the real sha256."
+            )
+        _do_download(name, entry, target)
+        actual = _sha256_of(target)
+        print()
+        print(f"[bootstrap] {name}")
+        print(f"  downloaded → {target}")
+        print(f"  sha256:      {actual}")
+        print(f"  ACTION: paste this sha256 into weights/WEIGHTS.lock under '{name}'.")
+        return
+
+    if target.exists() and _sha256_of(target) == expected_sha:
+        print(f"[download] {name}: up to date ({target})")
+        return
+    _do_download(name, entry, target)
     actual = _sha256_of(target)
     if actual != expected_sha:
         target.unlink(missing_ok=True)
@@ -70,6 +97,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--method", required=True)
     parser.add_argument("--target", required=True, type=Path)
+    parser.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="Allow downloading entries whose sha256 is a placeholder; "
+             "print the captured sha256 so you can update WEIGHTS.lock.",
+    )
     args = parser.parse_args()
 
     lock_path = Path(__file__).resolve().parents[1] / "weights" / "WEIGHTS.lock"
@@ -77,7 +110,9 @@ def main():
     if args.method not in lock:
         sys.exit(f"[download] no entries for method '{args.method}' in {lock_path}")
     for variant, entry in lock[args.method].items():
-        _process_entry(f"{args.method}.{variant}", entry, args.target)
+        _process_entry(
+            f"{args.method}.{variant}", entry, args.target, bootstrap=args.bootstrap
+        )
 
 
 if __name__ == "__main__":

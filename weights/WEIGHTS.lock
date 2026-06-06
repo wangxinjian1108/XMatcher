@@ -1,7 +1,14 @@
 # Schema: <method> -> <variant> -> {source, sha256, target}
 # source is one of: gdrive_id, http_url
+#
+# When sha256 is set to "BOOTSTRAP", run:
+#     scripts/download_weights.sh efficient_loftr --bootstrap
+# The script will download the file, print its sha256, and ask you to paste
+# the value back here. Subsequent runs without --bootstrap will hard-error
+# until the placeholder is replaced.
+
 efficient_loftr:
   outdoor:
-    gdrive_id: "<TO_FILL_DURING_FIRST_DOWNLOAD>"
-    sha256:    "<TO_FILL_DURING_FIRST_DOWNLOAD>"
-    target:    "efficient_loftr/eloftr_outdoor.ckpt"
+    http_url: "https://huggingface.co/zju-community/efficientloftr/resolve/main/eloftr_outdoor.ckpt"
+    sha256:   "BOOTSTRAP"
+    target:   "efficient_loftr/eloftr_outdoor.ckpt"
