@@ -46,8 +46,14 @@ def _fetch_gdrive(file_id: str, dest: Path) -> None:
 
 
 def _build_http_request(url: str) -> urllib.request.Request:
-    """Build a Request, attaching HF_TOKEN as a Bearer header for huggingface.co."""
-    req = urllib.request.Request(url)
+    """Build a Request with a real User-Agent. HF (and some CDNs) return 404 to
+    the default Python-urllib/X UA. HF_TOKEN is attached as Bearer for any
+    huggingface.co host (including subdomains like cdn-lfs.huggingface.co).
+    """
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "xmatcher-download/0.1 (+https://github.com/wangxinjian1108/XMatcher)"},
+    )
     host = (urlparse(url).hostname or "").lower()
     if host.endswith("huggingface.co"):
         token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")

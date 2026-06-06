@@ -53,3 +53,16 @@ def test_subdomain_of_hf_gets_token(dl, monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "tok-abc")
     req = dl._build_http_request("https://cdn-lfs.huggingface.co/blob.bin")
     assert req.get_header("Authorization") == "Bearer tok-abc"
+
+
+def test_user_agent_is_always_set(dl, monkeypatch):
+    """HF / GitHub releases sometimes return 404 for the default Python-urllib UA."""
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    for url in (
+        "https://huggingface.co/foo/resolve/main/x.bin",
+        "https://github.com/cvg/LightGlue/releases/download/v0.1_arxiv/x.pth",
+        "https://example.com/file.bin",
+    ):
+        req = dl._build_http_request(url)
+        ua = req.get_header("User-agent")  # urllib normalizes header names
+        assert ua and ua.startswith("xmatcher-"), f"UA missing for {url!r}: {ua!r}"
