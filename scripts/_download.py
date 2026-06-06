@@ -18,7 +18,6 @@ import argparse
 import hashlib
 import os
 import sys
-import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 import yaml
@@ -45,32 +44,51 @@ def _fetch_gdrive(file_id: str, dest: Path) -> None:
     gdown.download(id=file_id, output=str(dest), quiet=False)
 
 
-def _build_http_request(url: str) -> urllib.request.Request:
-    """Build a Request with a real User-Agent. HF (and some CDNs) return 404 to
-    the default Python-urllib/X UA. HF_TOKEN is attached as Bearer for any
-    huggingface.co host (including subdomains like cdn-lfs.huggingface.co).
+def _http_headers(url: str) -> dict[str, str]:
+    """Headers to attach to every HTTP fetch.
+
+    User-Agent is set unconditionally (default Python-urllib UA, and curl's
+    default UA when called by Docker layers, are sometimes 404'd by CDN
+    edge caches). HF_TOKEN is attached as Bearer for any huggingface.co
+    host (including subdomains like cdn-lfs.huggingface.co).
     """
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "xmatcher-download/0.1 (+https://github.com/wangxinjian1108/XMatcher)"},
-    )
+    headers: dict[str, str] = {
+        "User-Agent": "xmatcher-download/0.1 (+https://github.com/wangxinjian1108/XMatcher)",
+    }
     host = (urlparse(url).hostname or "").lower()
     if host.endswith("huggingface.co"):
         token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
         if token:
-            req.add_header("Authorization", f"Bearer {token}")
-    return req
+            headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def _fetch_http(url: str, dest: Path) -> None:
+    """Download `url` to `dest` via curl.
+
+    Why curl rather than urllib: HuggingFace's /resolve/ URLs return 302
+    redirects to per-request signed CDN URLs (cdn-lfs-*.huggingface.co).
+    Python's urllib follows redirects but strips Authorization across
+    origins, and some path/UA combinations return 404 instead of the
+    expected 302 — a known wart of urlopen against modern S3-fronted CDNs.
+    curl's redirect + retry handling is battle-tested and works the same
+    way HuggingFace's own client libraries do.
+    """
+    import shutil
+    import subprocess
     dest.parent.mkdir(parents=True, exist_ok=True)
-    req = _build_http_request(url)
-    with urllib.request.urlopen(req) as r, dest.open("wb") as f:
-        while True:
-            chunk = r.read(1 << 20)
-            if not chunk:
-                break
-            f.write(chunk)
+    if shutil.which("curl") is None:
+        raise RuntimeError(
+            "curl not found in PATH; needed by xmatcher's weight downloader."
+        )
+    header_args: list[str] = []
+    for k, v in _http_headers(url).items():
+        header_args += ["-H", f"{k}: {v}"]
+    cmd = [
+        "curl", "-fL", "--retry", "3", "--retry-delay", "2",
+        *header_args, "-o", str(dest), url,
+    ]
+    subprocess.run(cmd, check=True)
 
 
 def _do_download(name: str, entry: dict, target: Path) -> None:
