@@ -1,8 +1,13 @@
 """Inject thirdparty/<repo> roots into sys.path.
 
 Imported as a side effect by `xmatcher.methods.__init__`. Order matters:
-must run before any adapter does `from lightglue import ...` or
-`from src.loftr import ...`.
+must run before any adapter does `from lightglue import ...`.
+
+EfficientLoFTR is loaded via HuggingFace transformers
+(`AutoModelForKeypointMatching`) and does not need its upstream code on
+sys.path — the `thirdparty/EfficientLoFTR/` checkout is kept only as
+historical reference and for users who want to run upstream's training
+scripts directly.
 """
 from __future__ import annotations
 import sys
@@ -13,7 +18,6 @@ _THIRDPARTY = _ROOT / "thirdparty"
 
 _TARGETS = [
     "LightGlue",
-    "EfficientLoFTR",
 ]
 
 for _sub in _TARGETS:

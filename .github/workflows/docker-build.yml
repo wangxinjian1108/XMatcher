@@ -72,35 +72,6 @@ jobs:
             type=sha,format=long,suffix=-bundled
             type=raw,value=latest-bundled,enable={{is_default_branch}}
 
-      - name: Diagnose HuggingFace reachability from runner
-        run: |
-          set -x
-          echo "--- runner geo ---"
-          curl -sS -m 10 https://ipinfo.io/json || true
-          echo
-          echo "--- DNS ---"
-          getent hosts huggingface.co || true
-          echo
-          echo "--- HEAD model card ---"
-          curl -sSI -m 15 -A "xmatcher-diag/0.1" \
-            https://huggingface.co/zju-community/efficientloftr | head -20 || true
-          echo
-          echo "--- HEAD resolve URL (the one that fails) ---"
-          curl -sSI -m 15 -A "xmatcher-diag/0.1" \
-            https://huggingface.co/zju-community/efficientloftr/resolve/main/eloftr_outdoor.ckpt \
-            | head -25 || true
-          echo
-          echo "--- HEAD using HF API ---"
-          curl -sS -m 15 -A "xmatcher-diag/0.1" \
-            https://huggingface.co/api/models/zju-community/efficientloftr | head -c 1500 || true
-          echo
-          echo "--- GET resolve URL with -L (follow redirects), 256 bytes ---"
-          curl -sSL -m 30 -A "xmatcher-diag/0.1" \
-            https://huggingface.co/zju-community/efficientloftr/resolve/main/eloftr_outdoor.ckpt \
-            -o /tmp/probe.bin -w 'HTTP=%{http_code} URL=%{url_effective} SIZE=%{size_download}\n' || true
-          file /tmp/probe.bin || true
-          head -c 256 /tmp/probe.bin | xxd | head -10 || true
-
       - name: Build & push bundled image (weights baked in)
         uses: docker/build-push-action@v5
         with:
@@ -109,6 +80,9 @@ jobs:
           push: true
           # Pin the bundled stage's FROM to the digest we just pushed,
           # so the two images are always consistent within a single run.
+          # HF_ENDPOINT is left at its default (huggingface.co); GHA US
+          # runners reach HF directly. Override at workflow level if you
+          # need to use a mirror (e.g. https://hf-mirror.com).
           build-args: |
             BASE_IMAGE=ghcr.io/${{ steps.lower.outputs.owner }}/xmatcher@${{ steps.lean.outputs.digest }}
           tags: ${{ steps.meta_bundled.outputs.tags }}

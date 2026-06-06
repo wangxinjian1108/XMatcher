@@ -84,19 +84,25 @@ def test_runconfig_rejects_unknown_device():
         RunConfig.model_validate({"method": "toy", "device": "tpu", "params": {}})
 
 
-def test_efficient_loftr_params_rejects_missing_weights(tmp_path, monkeypatch):
+def test_efficient_loftr_params_defaults():
     from xmatcher.methods.efficient_loftr import EfficientLoFTRParams
-    monkeypatch.setenv("XMATCHER_WEIGHTS_DIR", str(tmp_path))
+    p = EfficientLoFTRParams()
+    assert p.repo_id == "zju-community/efficientloftr"
+    assert p.precision == "fp32"
+    assert 0.0 <= p.match_threshold <= 1.0
+
+
+def test_efficient_loftr_params_rejects_invalid_precision():
+    from xmatcher.methods.efficient_loftr import EfficientLoFTRParams
     import pytest
-    with pytest.raises(FileNotFoundError, match="Weight not found"):
-        EfficientLoFTRParams(weights="efficient_loftr/missing.ckpt")
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        EfficientLoFTRParams(precision="mp")  # old name, no longer valid
 
 
-def test_efficient_loftr_params_accepts_existing_weights(tmp_path, monkeypatch):
+def test_efficient_loftr_params_rejects_threshold_out_of_range():
     from xmatcher.methods.efficient_loftr import EfficientLoFTRParams
-    monkeypatch.setenv("XMATCHER_WEIGHTS_DIR", str(tmp_path))
-    fake = tmp_path / "efficient_loftr" / "x.ckpt"
-    fake.parent.mkdir(parents=True)
-    fake.write_bytes(b"")
-    p = EfficientLoFTRParams(weights="efficient_loftr/x.ckpt")
-    assert p.weights == fake.resolve() or p.weights == fake
+    import pytest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        EfficientLoFTRParams(match_threshold=1.5)

@@ -2,16 +2,16 @@
 # source is one of: gdrive_id, http_url
 #
 # When sha256 is set to "BOOTSTRAP", run:
-#     scripts/download_weights.sh efficient_loftr --bootstrap
+#     scripts/download_weights.sh <method> --bootstrap
 # The script will download the file, print its sha256, and ask you to paste
 # the value back here. Subsequent runs without --bootstrap will hard-error
 # until the placeholder is replaced.
-
-efficient_loftr:
-  outdoor:
-    http_url: "https://huggingface.co/zju-community/efficientloftr/resolve/main/eloftr_outdoor.ckpt"
-    sha256:   "0af6291141c736e75e94b7f8aae4399b77c7731b3f08758212b2cfe370188878"
-    target:   "efficient_loftr/eloftr_outdoor.ckpt"
+#
+# EfficientLoFTR is loaded via the HuggingFace transformers library
+# (`AutoModelForKeypointMatching.from_pretrained("zju-community/efficientloftr")`)
+# rather than this lock file — transformers manages its own cache and
+# integrity. To use a HF mirror, set HF_ENDPOINT (e.g.
+# https://hf-mirror.com); to gate behind a token, set HF_TOKEN.
 
 # LightGlue weights — at runtime the adapter relies on torch.hub auto-download
 # into ~/.cache/torch/hub/checkpoints/. These entries exist for:

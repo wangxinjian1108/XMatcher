@@ -1,43 +1,24 @@
 from __future__ import annotations
-import os
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Literal
 import torch
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from xmatcher.core.base import BaseMatcher
 from xmatcher.core.registry import register
 from xmatcher.core.types import _RawOutput, ImagePair
-from xmatcher.core.preprocess import _to_gray_align32
 
 
 class EfficientLoFTRParams(BaseModel):
-    weights: Path
-    precision: Literal["fp32", "fp16", "mp"] = "mp"
-    match_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
-    border_rm: int = Field(default=2, ge=0)
+    """Parameters for the transformers-based EfficientLoFTR adapter.
 
-    @field_validator("weights", mode="after")
-    @classmethod
-    def _resolve_weights(cls, v: Path) -> Path:
-        if v.is_absolute():
-            if not v.exists():
-                raise FileNotFoundError(
-                    f"Weight not found: {v}\n"
-                    f"Run scripts/download_weights.sh efficient_loftr to fetch it."
-                )
-            return v
-        base = Path(os.environ.get(
-            "XMATCHER_WEIGHTS_DIR",
-            Path.home() / ".cache" / "xmatcher",
-        ))
-        resolved = base / v
-        if not resolved.exists():
-            raise FileNotFoundError(
-                f"Weight not found: {resolved}\n"
-                f"Run scripts/download_weights.sh efficient_loftr to fetch it."
-            )
-        return resolved
+    Weights are loaded via `from_pretrained(repo_id)`; transformers handles
+    download + cache (~/.cache/huggingface/) + integrity. To use a local
+    snapshot or a private repo, set `repo_id` to the path or set HF_TOKEN.
+    To route through a HuggingFace mirror, set HF_ENDPOINT in the env.
+    """
+    repo_id: str = "zju-community/efficientloftr"
+    precision: Literal["fp32", "fp16", "bf16"] = "fp32"
+    match_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
 
 
 @register("efficient_loftr")
@@ -45,59 +26,46 @@ class EfficientLoFTRMatcher(BaseMatcher):
     Params = EfficientLoFTRParams
 
     def _setup(self):
-        from src.loftr import LoFTR, reparameter
-        from src.config.default import get_cfg_defaults
-        from src.loftr.utils.full_config import lower_config
-        cfg = get_cfg_defaults()
-        cfg.LOFTR.MATCH_COARSE.THR = self.params.match_threshold
-        cfg.LOFTR.MATCH_COARSE.BORDER_RM = self.params.border_rm
-        # NPE = [train_long_side, train_long_side, eval_long_side, eval_long_side].
-        # Training resolution is 832 (per upstream test.py). We use the matching
-        # 832 here as a safe default that works for any input long-side
-        # by relying on RoPE's relative encoding within that range.
-        cfg.LOFTR.COARSE.NPE = [832, 832, 832, 832]
-        if self.params.precision == "fp16":
-            cfg.LOFTR.HALF = True
-            cfg.LOFTR.MP = False
-        elif self.params.precision == "fp32":
-            cfg.LOFTR.HALF = False
-            cfg.LOFTR.MP = False
-        else:  # "mp"
-            cfg.LOFTR.HALF = False
-            cfg.LOFTR.MP = True
-
-        # LoFTR's submodules look up their config keys in lowercase
-        # (e.g. backbone reads config['backbone_type']), while yacs CfgNode
-        # exposes them uppercase. lower_config() bridges the two.
-        self.matcher = LoFTR(config=lower_config(cfg.LOFTR))
-        # weights_only=False: the upstream ckpt embeds pytorch_lightning
-        # ModelCheckpoint training metadata. We pin the file's sha256 in
-        # WEIGHTS.lock, so source integrity is verified separately.
-        state = torch.load(self.params.weights, map_location="cpu", weights_only=False)
-        self.matcher.load_state_dict(state["state_dict"])
-        self.matcher = reparameter(self.matcher).eval().to(self.device)
-        self._cfg = cfg
+        from transformers import AutoImageProcessor, AutoModelForKeypointMatching
+        self.processor = AutoImageProcessor.from_pretrained(self.params.repo_id)
+        dtype = {
+            "fp32": torch.float32,
+            "fp16": torch.float16,
+            "bf16": torch.bfloat16,
+        }[self.params.precision]
+        self.model = (
+            AutoModelForKeypointMatching
+            .from_pretrained(self.params.repo_id, dtype=dtype)
+            .eval()
+            .to(self.device)
+        )
 
     def _forward(self, pair: ImagePair) -> _RawOutput:
-        # Adapter-internal preprocessing: gray + pad to 32-multiple.
-        img0_pad, _pad0 = _to_gray_align32(pair.image0)
-        img1_pad, _pad1 = _to_gray_align32(pair.image1)
-        # _to_gray_align32 returns (0, 0) — right/bottom padding does not shift origin,
-        # so kpts in proc-padded coords already equal kpts in dataset's processed coords.
-        data = {
-            "image0": img0_pad.to(self.device).unsqueeze(0),
-            "image1": img1_pad.to(self.device).unsqueeze(0),
-        }
-        ctx = (
-            torch.autocast(device_type="cuda", dtype=torch.float16)
-            if self._cfg.LOFTR.MP and "cuda" in str(self.device)
-            else nullcontext()
+        # We feed the dataset's already-processed images directly so target_sizes
+        # equals processed_size; the post-processor maps back to those same
+        # coords, which is the contract _forward must satisfy (BaseMatcher's
+        # __call__ then runs unproject + mask filtering).
+        # do_rescale=False because our ImagePair tensors are already in [0,1];
+        # without this the processor divides by 255 again, giving a ~max=0.004
+        # input that produces only border-noise matches.
+        H0, W0 = pair.meta0.processed_size
+        H1, W1 = pair.meta1.processed_size
+        inputs = self.processor(
+            images=[[pair.image0, pair.image1]],
+            return_tensors="pt",
+            do_rescale=False,
+        ).to(self.device)
+        with torch.inference_mode():
+            outputs = self.model(**inputs)
+        results = self.processor.post_process_keypoint_matching(
+            outputs,
+            target_sizes=[[(H0, W0), (H1, W1)]],
+            threshold=self.params.match_threshold,
         )
-        with ctx:
-            self.matcher(data)
+        r = results[0]
         return _RawOutput(
-            mkpts0=data["mkpts0_f"],
-            mkpts1=data["mkpts1_f"],
-            mconf=data["mconf"],
+            mkpts0=r["keypoints0"].to(self.device, dtype=torch.float32),
+            mkpts1=r["keypoints1"].to(self.device, dtype=torch.float32),
+            mconf=r["matching_scores"].to(self.device, dtype=torch.float32),
             dense=None,
         )

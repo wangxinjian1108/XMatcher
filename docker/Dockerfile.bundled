@@ -3,28 +3,42 @@
 # Trade-off vs. the lean image:
 #   + No volume mount needed for weights
 #   + Air-gapped / offline-first deployments work out of the box
-#   - ~250 MB larger (eloftr_outdoor.ckpt ≈ 184 MB + LightGlue ≈ 50 MB)
+#   - ~250 MB larger (EfficientLoFTR safetensors ~64 MB + LightGlue ~50 MB)
 #   - Tied to specific weight versions; bumping requires a rebuild
 #
 # Use the lean image (`xmatcher:latest`) for development and CI; use this
 # bundled variant (`xmatcher:latest-bundled`) for one-shot demos or
-# environments that can't mount external caches.
+# environments that can't reach the network at runtime.
+#
+# Build args:
+#   BASE_IMAGE   the lean image to extend (defaults to :latest on GHCR).
+#   HF_ENDPOINT  set to https://hf-mirror.com (or another mirror) when the
+#                build environment cannot reach huggingface.co directly.
 ARG BASE_IMAGE=ghcr.io/wangxinjian1108/xmatcher:latest
 FROM ${BASE_IMAGE}
 
-# Download weights into XMATCHER_WEIGHTS_DIR (set in the base image).
-# Network is needed at build time; the script verifies sha256 against
-# weights/WEIGHTS.lock and hard-errors on any mismatch.
-RUN scripts/download_weights.sh efficient_loftr lightglue
+# Allow callers to route HuggingFace through a mirror at build time.
+ARG HF_ENDPOINT=""
+ENV HF_ENDPOINT=${HF_ENDPOINT}
 
-# Pre-warm the torch.hub cache the LightGlue adapter looks at.
-# At runtime the adapter calls `torch.hub.load_state_dict_from_url(...)` which
-# resolves to ~/.cache/torch/hub/checkpoints/<filename>. We seed it from the
-# already-downloaded XMATCHER_WEIGHTS_DIR copies so first inference is offline.
-RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
+# 1. LightGlue weights — pinned by sha256 in WEIGHTS.lock, downloaded by
+#    our verifier script. Files land under XMATCHER_WEIGHTS_DIR (set in
+#    the base image) and are then symlinked into ~/.cache/torch/hub/
+#    where the LightGlue adapter's torch.hub auto-download path looks.
+RUN scripts/download_weights.sh lightglue && \
+    mkdir -p /root/.cache/torch/hub/checkpoints && \
     cp ${XMATCHER_WEIGHTS_DIR}/lightglue/superpoint_v1.pth \
        /root/.cache/torch/hub/checkpoints/superpoint_v1.pth && \
     cp ${XMATCHER_WEIGHTS_DIR}/lightglue/superpoint_lightglue.pth \
        /root/.cache/torch/hub/checkpoints/superpoint_lightglue_v0-1_arxiv.pth
+
+# 2. EfficientLoFTR weights — fetched via huggingface_hub into
+#    ~/.cache/huggingface/. We use snapshot_download with a pinned revision
+#    to avoid any later upstream rename/move surprising us; the revision is
+#    captured here as a deliberate version pin.
+ARG ELOFTR_REPO=zju-community/efficientloftr
+ARG ELOFTR_REVISION=face1a79050ffa3e9da28720d1cf93aaf2e8f421
+RUN python -c "from huggingface_hub import snapshot_download; \
+    snapshot_download(repo_id='${ELOFTR_REPO}', revision='${ELOFTR_REVISION}')"
 
 # ENTRYPOINT and CMD are inherited from the base image.

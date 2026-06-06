@@ -2,7 +2,6 @@ method: efficient_loftr
 device: cuda
 seed: 0
 params:
-  weights: efficient_loftr/eloftr_outdoor.ckpt
-  precision: mp
+  repo_id: zju-community/efficientloftr
+  precision: fp32
   match_threshold: 0.2
-  border_rm: 2

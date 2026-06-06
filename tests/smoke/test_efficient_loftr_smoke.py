@@ -22,16 +22,12 @@ def _pil_to_tensor(pil_img):
 
 
 def _load_pair():
-    """Load + crop so H/W are 32-aligned (so the adapter's pad is a no-op,
-    making coord checks easier)."""
+    """Load fixtures at native resolution. The transformers-based EfficientLoFTR
+    adapter routes through AutoImageProcessor which handles arbitrary input
+    sizes (resizes to its own internal grid and post-processes back to the
+    target_sizes we pass), so no caller-side cropping is needed."""
     img0 = _pil_to_tensor(Image.open(FIXTURES / "sample_a.jpg").convert("RGB"))
     img1 = _pil_to_tensor(Image.open(FIXTURES / "sample_b.jpg").convert("RGB"))
-    def _crop32(t):
-        _, H, W = t.shape
-        H32 = (H // 32) * 32
-        W32 = (W // 32) * 32
-        return t[:, :H32, :W32]
-    img0 = _crop32(img0); img1 = _crop32(img1)
     H0, W0 = img0.shape[-2:]
     H1, W1 = img1.shape[-2:]
     meta0 = PreprocessMeta(
