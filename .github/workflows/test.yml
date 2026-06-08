@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 jobs:
@@ -30,7 +30,13 @@ jobs:
               --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install package
-        run: pip install -e .[test] kornia pytorch-lightning yacs loguru h5py
+        run: |
+          pip install -e .[test]
+          # Per-method runtime deps (mirrors docker/requirements.*.txt).
+          # Kept in this workflow rather than as project extras because they
+          # are heavy and only the matchers need them.
+          pip install kornia                                # LightGlue
+          pip install "transformers>=4.51,<4.55" safetensors  # EfficientLoFTR
 
       - name: Run unit + contract tests
         run: pytest tests/unit tests/contract -v

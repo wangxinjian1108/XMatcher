@@ -25,7 +25,7 @@ python -m xmatcher.cli.run \
 
 ## Docker
 
-Two image flavors are published to GHCR on every push to `main`:
+Two image flavors are published to GHCR on every push to `master`:
 
 - `ghcr.io/wangxinjian1108/xmatcher:latest` — lean (~5 GB), expects weights
   to be mounted from the host.
