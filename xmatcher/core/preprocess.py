@@ -72,3 +72,44 @@ def _to_gray_align32(img: torch.Tensor) -> tuple[torch.Tensor, tuple[int, int]]:
         # F.pad layout for (C, H, W): (left, right, top, bottom)
         gray = F.pad(gray, (0, pad_w, 0, pad_h), mode="constant", value=0.0)
     return gray, (0, 0)
+
+
+def apply_input_mask(image: torch.Tensor, meta: PreprocessMeta) -> torch.Tensor:
+    """Zero out pixels of `image` that fall outside `meta.valid_mask`.
+
+    The image is (C, H_proc, W_proc); the mask is (H_proc, W_proc) bool.
+    No-op if `meta.valid_mask is None`. The original tensor is left intact;
+    a new tensor is returned. Padding pixels (mask=False from preprocessing)
+    AND user-supplied foreground masks (mask=False outside ROI) are both
+    handled by this single mechanism — callers AND them together at dataset
+    construction time.
+    """
+    if meta.valid_mask is None:
+        return image
+    mask = meta.valid_mask.to(image.device)
+    # Broadcast (H, W) → (1, H, W) → (C, H, W)
+    return image * mask.unsqueeze(0)
+
+
+def filter_kpts_by_mask(
+    keypoints: torch.Tensor, meta: PreprocessMeta
+) -> torch.Tensor:
+    """Bool keep-mask for `keypoints` (K, 2) in processed coords.
+
+    Drops points that fall outside [0, W_proc) x [0, H_proc) OR outside
+    `meta.valid_mask` (when provided). Returns a (K,) bool tensor on the
+    same device as `keypoints`. No-op-equivalent (all True, modulo bounds)
+    when `meta.valid_mask is None`.
+    """
+    K = keypoints.shape[0]
+    if K == 0:
+        return torch.zeros((0,), dtype=torch.bool, device=keypoints.device)
+    H_proc, W_proc = meta.processed_size
+    u, v = keypoints[:, 0], keypoints[:, 1]
+    keep = (u >= 0) & (u < W_proc) & (v >= 0) & (v < H_proc)
+    if meta.valid_mask is not None:
+        uu = u.clamp(0, W_proc - 1).round().long()
+        vv = v.clamp(0, H_proc - 1).round().long()
+        mask_val = meta.valid_mask.to(keypoints.device)[vv, uu]
+        keep = keep & mask_val
+    return keep

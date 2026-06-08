@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from xmatcher.core.base import BaseMatcher
 from xmatcher.core.registry import register
 from xmatcher.core.types import _RawOutput, ImagePair
+from xmatcher.core.preprocess import filter_kpts_by_mask
 
 
 class LightGlueParams(BaseModel):
@@ -43,6 +44,13 @@ class LightGlueMatcher(BaseMatcher):
         # output keypoints will be in its internal grid → unproject breaks.
         feats0 = self.extractor.extract(img0, resize=None)
         feats1 = self.extractor.extract(img1, resize=None)
+        # Drop keypoints landing outside the user-supplied valid_mask.
+        # (BaseMatcher already zeroed the input image outside the mask, so
+        # SuperPoint's response is depressed there, but it can still detect
+        # spurious points right at the mask boundary. Filtering here is
+        # the contract that "no keypoint exits this adapter outside the mask".)
+        feats0 = _filter_feats_by_mask(feats0, pair.meta0)
+        feats1 = _filter_feats_by_mask(feats1, pair.meta1)
         out = self.matcher({"image0": feats0, "image1": feats1})
         feats0, feats1, out = [rbd(x) for x in (feats0, feats1, out)]
         m = out["matches"]
@@ -63,12 +71,14 @@ class LightGlueMatcher(BaseMatcher):
              SuperPoint.forward only batches when every image happens to
              yield exactly `max_num_keypoints` detections (it does
              `torch.stack` on the per-image keypoint lists).
-          2. Pad each image's keypoints/descriptors/scores to the same K
+          2. Drop keypoints landing outside the per-image valid_mask
+             (foreground / ROI mask supplied by the dataset).
+          3. Pad each image's keypoints/descriptors/scores to the same K
              (max count across the batch, capped at max_num_keypoints).
              Padded slots are zeroed out and the score=0 effectively
              excludes them from matcher attention.
-          3. Stack into (B, K, ...) batches for image0 and image1.
-          4. Run LightGlue once. Adaptive **depth** pruning still operates
+          4. Stack into (B, K, ...) batches for image0 and image1.
+          5. Run LightGlue once. Adaptive **depth** pruning still operates
              at the batch granularity (early-stop kicks in when the batch
              as a whole has converged). Adaptive **width** pruning (point
              pruning) is **disabled** during batch inference: upstream
@@ -76,7 +86,7 @@ class LightGlueMatcher(BaseMatcher):
              with batch dim 1 (`torch.arange(...)[None]`) and crashes for
              any B > 1. Disabling width_confidence is the user-facing
              documented fallback for this case.
-          5. Per-pair, slice `out["matches"][i]` and `out["scores"][i]`,
+          6. Per-pair, slice `out["matches"][i]` and `out["scores"][i]`,
              which are already lists indexed by pair.
         """
         if not pairs:
@@ -86,11 +96,12 @@ class LightGlueMatcher(BaseMatcher):
             # touch LightGlue's adaptive-width settings.
             return [self._forward(pairs[0])]
 
-        # 1+2: extract per-image, pad to common K.
+        # 1+2: extract per-image, then mask-filter, then collect raw lists.
         per_image_feats: list[dict] = []
         for pair in pairs:
-            for img in (pair.image0, pair.image1):
+            for img, meta in ((pair.image0, pair.meta0), (pair.image1, pair.meta1)):
                 feats = self.extractor.extract(img.to(self.device), resize=None)
+                feats = _filter_feats_by_mask(feats, meta)
                 # extract() returns batched (1, *, ...); strip batch.
                 per_image_feats.append({
                     "keypoints": feats["keypoints"][0],         # (N, 2)
@@ -101,6 +112,12 @@ class LightGlueMatcher(BaseMatcher):
 
         K = max(f["keypoints"].shape[0] for f in per_image_feats)
         K = min(K, self.params.max_num_keypoints)
+        # All-mask-empty edge case: K==0 would give a degenerate (B, 0, *)
+        # tensor that LightGlue handles via its "no keypoints" return path,
+        # but we still need to give it at least size 1 so downstream slicing
+        # works. Fall back to K=1 with all-zero/all-score=0 padding; the
+        # matcher's no-keypoints early return then yields zero matches.
+        K = max(K, 1)
 
         kpts_b, scores_b, desc_b, sizes_b = [], [], [], []
         for f in per_image_feats:
@@ -111,6 +128,13 @@ class LightGlueMatcher(BaseMatcher):
                 desc_b.append(f["descriptors"][:K])
             else:
                 pad = K - n
+                # Determine descriptor dim from the extractor when n=0 (no
+                # rows to read shape from).
+                desc_dim = (
+                    f["descriptors"].shape[-1]
+                    if n > 0
+                    else self.extractor.conf.descriptor_dim
+                )
                 kpts_b.append(torch.cat([
                     f["keypoints"],
                     torch.zeros(pad, 2, device=self.device, dtype=f["keypoints"].dtype),
@@ -122,13 +146,13 @@ class LightGlueMatcher(BaseMatcher):
                 desc_b.append(torch.cat([
                     f["descriptors"],
                     torch.zeros(
-                        pad, f["descriptors"].shape[-1],
+                        pad, desc_dim,
                         device=self.device, dtype=f["descriptors"].dtype,
                     ),
                 ]))
             sizes_b.append(f["image_size"])
 
-        # 3: stack and split into image0 / image1 batches.
+        # 4: stack and split into image0 / image1 batches.
         all_kpts = torch.stack(kpts_b)        # (2B, K, 2)
         all_scores = torch.stack(scores_b)    # (2B, K)
         all_desc = torch.stack(desc_b)        # (2B, K, D)
@@ -147,7 +171,7 @@ class LightGlueMatcher(BaseMatcher):
             "image_size": all_sizes[1::2],
         }
 
-        # 4: temporarily disable adaptive point pruning; run matcher.
+        # 5: temporarily disable adaptive point pruning; run matcher.
         # See docstring: upstream's width-pruning code is not batch-safe.
         # Depth pruning (early stop) is left on; it works at the batch
         # granularity and saves the most compute in practice.
@@ -158,7 +182,7 @@ class LightGlueMatcher(BaseMatcher):
         finally:
             self.matcher.conf.width_confidence = original_width
 
-        # 5: split per-pair. matches/scores are returned as lists of length B
+        # 6: split per-pair. matches/scores are returned as lists of length B
         # because each pair yields a different number of matches.
         matches_list = out["matches"]
         scores_list = out["scores"]
@@ -176,3 +200,25 @@ class LightGlueMatcher(BaseMatcher):
             ))
         return results
 
+
+def _filter_feats_by_mask(feats: dict, meta) -> dict:
+    """Drop keypoints (and matching descriptors/scores) outside meta.valid_mask.
+
+    `feats` is what SuperPoint.extract() returns: a dict with batched (1, N, *)
+    tensors. This helper preserves the batch-1 shape but selects along the
+    keypoint dimension.
+
+    No-op (returns the original dict) when `meta.valid_mask is None`.
+    """
+    if meta.valid_mask is None:
+        return feats
+    keypoints = feats["keypoints"][0]    # (N, 2) in processed coords
+    keep = filter_kpts_by_mask(keypoints, meta)
+    if keep.all():
+        return feats
+    return {
+        **feats,
+        "keypoints": feats["keypoints"][:, keep],
+        "keypoint_scores": feats["keypoint_scores"][:, keep],
+        "descriptors": feats["descriptors"][:, keep],
+    }

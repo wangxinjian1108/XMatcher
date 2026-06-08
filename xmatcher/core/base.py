@@ -1,11 +1,12 @@
 from __future__ import annotations
 import abc
 import time
+from dataclasses import replace
 from typing import ClassVar
 import torch
 from pydantic import BaseModel
 from xmatcher.core.types import ImagePair, MatchResult, _RawOutput
-from xmatcher.core.preprocess import unproject, filter_by_mask
+from xmatcher.core.preprocess import unproject, filter_by_mask, apply_input_mask
 
 
 class BaseMatcher(abc.ABC):
@@ -19,12 +20,18 @@ class BaseMatcher(abc.ABC):
         a real batched forward path override `_forward_batch` to take
         advantage of it.
 
-    Both paths route through the same post-processing template:
-      1. mask-based filtering in processed coords
-      2. unproject to original coords
+    Both paths run a uniform pre/post pipeline around the subclass forward:
 
-    The template also owns timing. Subclasses receive only the question
-    "given this pair (or list of pairs), produce processed-coord matches."
+      pre  (template, applied to inputs before `_forward`):
+        1. zero out pixels of `image0/image1` that fall outside `valid_mask`
+           (`apply_input_mask`). The subclass receives a copy of the pair
+           with masked images; the original `pair` object is not mutated.
+
+      post (template, applied to subclass outputs):
+        1. filter raw matches by `valid_mask` (in processed coords)
+        2. unproject surviving matches to original coords
+
+    The template also owns timing.
     """
 
     method_name: ClassVar[str]            # set by @register("name")
@@ -57,7 +64,7 @@ class BaseMatcher(abc.ABC):
         return_processed_coords: bool = False,
     ) -> MatchResult:
         t0 = time.perf_counter()
-        raw = self._forward(pair)
+        raw = self._forward(_apply_pair_input_mask(pair))
         return self._postprocess(
             raw, pair, t0, return_processed_coords=return_processed_coords
         )
@@ -79,7 +86,8 @@ class BaseMatcher(abc.ABC):
         if not pairs:
             return []
         t0 = time.perf_counter()
-        raws = self._forward_batch(pairs)
+        masked_pairs = [_apply_pair_input_mask(p) for p in pairs]
+        raws = self._forward_batch(masked_pairs)
         if len(raws) != len(pairs):
             raise RuntimeError(
                 f"_forward_batch returned {len(raws)} outputs for {len(pairs)} "
@@ -124,3 +132,20 @@ class BaseMatcher(abc.ABC):
             runtime_ms=(time.perf_counter() - t0) * 1000,
             dense=raw.dense,
         )
+
+
+def _apply_pair_input_mask(pair: ImagePair) -> ImagePair:
+    """Return a new ImagePair whose images are zeroed outside their valid_mask.
+
+    No-op (returns the original pair) when neither side has a valid_mask set.
+    The metas, pair_id and extras are passed through unchanged. The original
+    `pair.image0/1` tensors are never mutated.
+    """
+    has_mask = pair.meta0.valid_mask is not None or pair.meta1.valid_mask is not None
+    if not has_mask:
+        return pair
+    return replace(
+        pair,
+        image0=apply_input_mask(pair.image0, pair.meta0),
+        image1=apply_input_mask(pair.image1, pair.meta1),
+    )
