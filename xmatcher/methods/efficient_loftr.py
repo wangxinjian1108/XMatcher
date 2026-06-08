@@ -51,10 +51,21 @@ class EfficientLoFTRMatcher(BaseMatcher):
         # do_rescale=False because our ImagePair tensors are already in [0,1];
         # without this the processor divides by 255 again, giving a ~max=0.004
         # input that produces only border-noise matches.
-        H0, W0 = pair.meta0.processed_size
-        H1, W1 = pair.meta1.processed_size
+        return self._forward_batch([pair])[0]
+
+    def _forward_batch(self, pairs: list[ImagePair]) -> list[_RawOutput]:
+        if not pairs:
+            return []
+        # AutoImageProcessor accepts the natural `[[im0, im1], ...]` shape:
+        # outer dim is batch (one entry per pair), inner dim is the pair.
+        # post_process_keypoint_matching mirrors the structure with
+        # target_sizes=[[(H0, W0), (H1, W1)], ...].
+        images = [[p.image0, p.image1] for p in pairs]
+        target_sizes = [
+            [p.meta0.processed_size, p.meta1.processed_size] for p in pairs
+        ]
         inputs = self.processor(
-            images=[[pair.image0, pair.image1]],
+            images=images,
             return_tensors="pt",
             do_rescale=False,
         ).to(self.device)
@@ -62,13 +73,15 @@ class EfficientLoFTRMatcher(BaseMatcher):
             outputs = self.model(**inputs)
         results = self.processor.post_process_keypoint_matching(
             outputs,
-            target_sizes=[[(H0, W0), (H1, W1)]],
+            target_sizes=target_sizes,
             threshold=self.params.match_threshold,
         )
-        r = results[0]
-        return _RawOutput(
-            mkpts0=r["keypoints0"].to(self.device, dtype=torch.float32),
-            mkpts1=r["keypoints1"].to(self.device, dtype=torch.float32),
-            mconf=r["matching_scores"].to(self.device, dtype=torch.float32),
-            dense=None,
-        )
+        return [
+            _RawOutput(
+                mkpts0=r["keypoints0"].to(self.device, dtype=torch.float32),
+                mkpts1=r["keypoints1"].to(self.device, dtype=torch.float32),
+                mconf=r["matching_scores"].to(self.device, dtype=torch.float32),
+                dense=None,
+            )
+            for r in results
+        ]
