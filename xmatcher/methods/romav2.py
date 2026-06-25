@@ -39,6 +39,10 @@ class RomaV2Params(BaseModel):
     setting: Literal["turbo", "fast", "base", "precise", "mega1500"] = "base"
     num_correspondences: int = Field(default=2048, gt=0)
     cert_threshold: float = 0.0
+    # Local checkpoint path. None -> RoMaV2 resolves $ROMAV2_WEIGHTS then the
+    # default /opt/var/models/romav2/romav2.0.1.pt. Runtime downloads are
+    # disabled (air-gapped release image).
+    weights: str | None = None
 
 
 @register("romav2")
@@ -48,7 +52,9 @@ class RomaV2Matcher(BaseMatcher):
     def _setup(self):
         from romav2 import RoMaV2
 
-        self.model = RoMaV2().eval().to(self.device)
+        self.model = (
+            RoMaV2(weights_path=self.params.weights).eval().to(self.device)
+        )
         self.model.apply_setting(self.params.setting)
 
     def _image_to_tensor(self, img: torch.Tensor) -> torch.Tensor:
